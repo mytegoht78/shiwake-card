@@ -1,0 +1,545 @@
+<!doctype html>
+<html lang="ja">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<title>仕分けカード</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Dela+Gothic+One&family=M+PLUS+Rounded+1c:wght@500;700;800&display=swap">
+<style>
+/* 画面全体を使う1画面アプリ。上に残り時間とスコア、中央に4象限の盤面、カードを中心から4方向へはじく */
+:root {
+  --bg: #e6edf6;
+  --ink: #14213d;
+  --ink-soft: #55648a;
+  --zone: #f5f8fc;
+  --zone-line: #c9d4e6;
+  --card: #ffffff;
+  --card-line: #14213d;
+  --ok: #16a34a;
+  --ng: #dc2626;
+  --bar: #14213d;
+  --bar-track: #cbd6e8;
+  --btn-bg: #14213d;
+  --btn-fg: #ffffff;
+  --shadow: rgba(20, 33, 61, .22);
+  --f-display: "Dela Gothic One", "M PLUS Rounded 1c", sans-serif;
+  --f-body: "M PLUS Rounded 1c", "Hiragino Maru Gothic ProN", "Yu Gothic", sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0d1626; --ink: #e8eefc; --ink-soft: #8d9cc0; --zone: #162238; --zone-line: #263554;
+    --card: #f6f8fc; --card-line: #0d1626; --bar: #e8eefc; --bar-track: #263554;
+    --btn-bg: #e8eefc; --btn-fg: #0d1626; --shadow: rgba(0, 0, 0, .5); color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0d1626; --ink: #e8eefc; --ink-soft: #8d9cc0; --zone: #162238; --zone-line: #263554;
+  --card: #f6f8fc; --card-line: #0d1626; --bar: #e8eefc; --bar-track: #263554;
+  --btn-bg: #e8eefc; --btn-fg: #0d1626; --shadow: rgba(0, 0, 0, .5); color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  background: var(--bg); color: var(--ink); font-family: var(--f-body); font-weight: 700;
+  padding-block: 12px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  overflow: hidden; user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent;
+}
+#app { height: 100%; max-width: 560px; margin: 0 auto; display: flex; flex-direction: column; gap: 10px; }
+
+.hud { display: grid; grid-template-columns: auto 1fr auto auto; align-items: center; gap: 14px; }
+.hud .num { font-family: var(--f-display); font-size: 28px; line-height: 1; font-variant-numeric: tabular-nums; min-width: 3.4ch; }
+.hud .lab { font-size: 11px; color: var(--ink-soft); letter-spacing: .08em; display: block; margin-bottom: 4px; }
+.hud .score { text-align: right; }
+.bar { height: 12px; border-radius: 6px; background: var(--bar-track); overflow: hidden; }
+.bar i { display: block; height: 100%; width: 100%; background: var(--bar); transform-origin: left; border-radius: 6px; }
+.bar.low i { background: var(--ng); }
+
+#field {
+  position: relative; flex: 1; min-height: 0; display: grid; grid-template: 1fr 1fr / 1fr 1fr; gap: 10px;
+  touch-action: none; cursor: grab;
+}
+#field.drag { cursor: grabbing; }
+.zone {
+  position: relative; background: var(--zone); border: 2px solid var(--zone-line); border-radius: 22px;
+  transition: background .12s, border-color .12s, opacity .2s;
+}
+.edge {
+  position: absolute; z-index: 3; display: flex; align-items: center; padding: 7px 14px;
+  background: var(--card); color: var(--card-line); border: 3px solid var(--card-line); border-radius: 999px;
+  font-family: var(--f-display); font-size: 19px; line-height: 1; white-space: nowrap; pointer-events: none;
+  box-shadow: 0 4px 0 -1px var(--shadow);
+}
+.edge[data-edge="up"] { top: -6px; left: 50%; translate: -50% 0; }
+.edge[data-edge="down"] { bottom: -6px; left: 50%; translate: -50% 0; }
+.edge[data-edge="left"] { left: -6px; top: 50%; translate: 0 -50%; }
+.edge[data-edge="right"] { right: -6px; top: 50%; translate: 0 -50%; }
+.edge[hidden] { display: none; }
+.mute { font: inherit; font-size: 18px; width: 38px; height: 38px; border-radius: 12px; border: 2px solid var(--zone-line); background: var(--zone); color: var(--ink); cursor: pointer; }
+.mute:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
+.mute[aria-pressed="true"] { opacity: .5; text-decoration: line-through; }
+.zone.hot { border-color: var(--ink); background: color-mix(in srgb, var(--zone) 82%, var(--ink)); }
+.zone.ok { border-color: var(--ok); background: color-mix(in srgb, var(--zone) 70%, var(--ok)); }
+.zone.ng { border-color: var(--ng); background: color-mix(in srgb, var(--zone) 70%, var(--ng)); }
+#field.locked .zone:not(.ng) { opacity: .55; }
+
+.card {
+  position: absolute; left: 50%; top: 50%; width: min(46%, 220px); aspect-ratio: 4 / 5;
+  transform: translate(-50%, -50%);
+  background: var(--card); border: 3px solid var(--card-line); border-radius: 22px;
+  box-shadow: 0 10px 0 -2px var(--shadow);
+  display: flex; align-items: center; justify-content: center; gap: 2%; padding: 8%;
+  animation: pop .16s ease-out; will-change: transform; z-index: 2;
+}
+.card svg { width: 100%; max-height: 100%; min-width: 0; position: relative; }
+.card.round { width: min(52%, 240px); aspect-ratio: 1; border-radius: 50%; padding: 13%; }
+.card.dirty { background-color: color-mix(in srgb, var(--card) 78%, #b08d57); }
+.card.dirty::before { content: ""; position: absolute; inset: 0; border-radius: inherit; background: var(--stains); pointer-events: none; }
+.card.two svg { width: 48%; }
+.card.shake { animation: shake .3s; }
+.card.snap { transition: transform .18s cubic-bezier(.3, 1.5, .5, 1); }
+@keyframes pop { from { scale: .6; opacity: 0; } to { scale: 1; opacity: 1; } }
+@keyframes shake { 0%, 100% { translate: 0 0; } 20% { translate: -10px 0; } 40% { translate: 9px 0; } 60% { translate: -7px 0; } 80% { translate: 5px 0; } }
+
+.overlay {
+  position: absolute; inset: 0; z-index: 5; display: flex; align-items: center; justify-content: center;
+  background: color-mix(in srgb, var(--bg) 80%, transparent); border-radius: 22px;
+}
+.overlay[hidden] { display: none; }
+.panel { width: 100%; max-width: 380px; padding: 18px; display: flex; flex-direction: column; align-items: center; gap: 14px; text-align: center; }
+.panel h1 { font-family: var(--f-display); font-weight: 400; font-size: 30px; margin: 0; text-wrap: balance; }
+.panel p { margin: 0; font-size: 14px; line-height: 1.6; color: var(--ink-soft); text-wrap: balance; }
+.panel .rule-text { color: var(--ink); font-size: 16px; }
+.map { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; width: min(100%, 280px); }
+.map div { background: var(--zone); border: 2px solid var(--zone-line); border-radius: 16px; padding: 8px; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 4px; height: 74px; font-family: var(--f-display); font-weight: 400; font-size: 16px; color: var(--ink); }
+.btn {
+  font: inherit; font-family: var(--f-display); font-size: 20px; letter-spacing: .06em; color: var(--btn-fg); background: var(--btn-bg);
+  border: 0; border-radius: 16px; padding: 14px 40px; cursor: pointer; box-shadow: 0 5px 0 -1px var(--shadow);
+}
+.lvl { display: flex; align-items: center; gap: 14px; }
+.lvl h1 { min-width: 5.5ch; }
+.mute:disabled { opacity: .3; cursor: default; }
+.btn[hidden] { display: none; }
+.btn.sub { font-family: var(--f-body); font-weight: 800; font-size: 14px; letter-spacing: 0; padding: 10px 22px; background: transparent; color: var(--ink); border: 2px solid var(--ink); box-shadow: none; }
+.btn:active { translate: 0 3px; box-shadow: 0 2px 0 -1px var(--shadow); }
+.btn:focus-visible, .opt input:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
+.opt { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--ink-soft); cursor: pointer; }
+.opt input { width: 18px; height: 18px; accent-color: var(--ink); }
+.count { font-family: var(--f-display); font-size: 120px; line-height: 1; }
+.res-score { font-family: var(--f-display); font-size: 84px; line-height: 1; font-variant-numeric: tabular-nums; }
+.res-sub { display: flex; gap: 22px; font-size: 13px; color: var(--ink-soft); }
+.res-sub b { display: block; font-family: var(--f-display); font-weight: 400; font-size: 20px; color: var(--ink); }
+.keys { font-size: 11px; color: var(--ink-soft); }
+@media (prefers-reduced-motion: reduce) { .card, .card.shake { animation: none; } .card.snap { transition: none; } }
+</style>
+
+<div id="app">
+  <div class="hud">
+    <div><span class="lab">のこり</span><span class="num" id="time">30.0</span></div>
+    <div class="bar" id="bar"><i id="barfill"></i></div>
+    <div class="score"><span class="lab" id="goal-lab">仕分け数 <b>目標10枚</b></span><span class="num" id="score">0</span></div>
+    <button class="mute" id="mute" type="button" aria-label="音のオン・オフ" aria-pressed="false">♪</button>
+  </div>
+  <div id="field">
+    <div class="zone" data-pos="tl"></div>
+    <div class="zone" data-pos="tr"></div>
+    <div class="zone" data-pos="bl"></div>
+    <div class="zone" data-pos="br"></div>
+    <div class="edge" data-edge="up" id="edge-up"><span></span></div>
+    <div class="edge" data-edge="down" id="edge-down"><span></span></div>
+    <div class="edge" data-edge="left" id="edge-left"><span></span></div>
+    <div class="edge" data-edge="right" id="edge-right"><span></span></div>
+
+    <div class="overlay" id="ov-rule">
+      <div class="panel">
+        <div class="lvl">
+          <button class="mute" id="lv-prev" type="button" aria-label="前のレベル">◀</button>
+          <h1 id="lv-name">レベル1</h1>
+          <button class="mute" id="lv-next" type="button" aria-label="次のレベル">▶</button>
+        </div>
+        <p id="lv-attrs"></p>
+        <div class="map" id="map"></div>
+        <button class="btn" id="startbtn" type="button">スタート</button>
+      </div>
+    </div>
+    <div class="overlay" id="ov-count" hidden><div class="count" id="count">3</div></div>
+    <div class="overlay" id="ov-result" hidden>
+      <div class="panel">
+        <h1 id="res-title">タイムアップ</h1>
+        <div class="res-score" id="res-score">0</div>
+        <div class="res-sub">
+          <span>ミス<b id="res-miss">0</b></span>
+          <span>正確さ<b id="res-acc">-</b></span>
+          <span>ベスト<b id="res-best">0</b></span>
+        </div>
+        <p id="res-msg"></p>
+        <button class="btn" id="nextbtn" type="button" hidden>次のレベルへ</button>
+        <button class="btn" id="againbtn" type="button">もう一回</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  var GAME_SEC = 30, LOCK_MS = 1000, SWIPE_MIN = 56;
+  var PALETTE = {
+    red:    { name: '赤', kana: 'あか', base: '#ef4444', dark: '#991b1b' },
+    blue:   { name: '青', kana: 'あお', base: '#3b82f6', dark: '#1e3a8a' },
+    yellow: { name: '黄', kana: 'きいろ', base: '#facc15', dark: '#92650a' },
+    green:  { name: '緑', kana: 'みどり', base: '#22c55e', dark: '#14532d' },
+    purple: { name: '紫', kana: 'むらさき', base: '#a855f7', dark: '#581c87' }
+  };
+  var COLOR_KEYS = Object.keys(PALETTE);
+  var POS = { tl: ['left', 'up'], tr: ['right', 'up'], bl: ['left', 'down'], br: ['right', 'down'] };
+  var JP = { left: '左', right: '右', up: '上', down: '下' };
+
+  var $ = function (id) { return document.getElementById(id); };
+  var field = $('field'), zones = {};
+  Array.prototype.forEach.call(field.querySelectorAll('.zone'), function (z) { zones[z.dataset.pos] = z; });
+
+  // ---- どうぶつの描画（顔だけのシンプルな絵。体の色は属性の「色」で塗る） ----
+  var KINDS = { lion: 'ライオン', elephant: 'ゾウ', rabbit: 'ウサギ', cat: 'ネコ', bear: 'クマ' };
+  var KIND_KEYS = Object.keys(KINDS);
+  function eye(x, y) {
+    return '<circle cx="' + x + '" cy="' + y + '" r="4.5" fill="#1b1b1b"/><circle cx="' + (x + 1.6) + '" cy="' + (y - 1.6) + '" r="1.6" fill="#fff"/>';
+  }
+  function drawObject(kind, colorKey) {
+    var c = PALETTE[colorKey];
+    var S = ' stroke="' + c.dark + '" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"';
+    var F = ' fill="' + c.base + '"';
+    var soft = ' fill="#fff" fill-opacity=".55"';
+    var nose = '<ellipse cx="50" cy="60" rx="5" ry="3.6" fill="#1b1b1b"/>';
+    var g = '';
+    if (kind === 'lion') {
+      for (var i = 0; i < 12; i++) {
+        var a = i / 12 * Math.PI * 2;
+        g += '<circle cx="' + (50 + Math.cos(a) * 36).toFixed(1) + '" cy="' + (52 + Math.sin(a) * 36).toFixed(1) + '" r="12" fill="' + c.dark + '"/>';
+      }
+      g += '<circle cx="50" cy="52" r="30"' + F + S + '/>' + eye(38, 46) + eye(62, 46) +
+        '<ellipse cx="50" cy="62" rx="13" ry="9"' + soft + '/>' + nose.replace('cy="60"', 'cy="58"') +
+        '<path d="M50 62V68M43 70Q50 74 57 70" fill="none" stroke="#1b1b1b" stroke-width="2.5" stroke-linecap="round"/>';
+    } else if (kind === 'elephant') {
+      g = '<circle cx="22" cy="48" r="17"' + F + S + '/><circle cx="22" cy="48" r="9"' + soft + '/>' +
+        '<circle cx="78" cy="48" r="17"' + F + S + '/><circle cx="78" cy="48" r="9"' + soft + '/>' +
+        '<circle cx="50" cy="46" r="29"' + F + S + '/>' +
+        '<path d="M41 56H59V80Q59 94 49 94Q42 94 42 87" fill="' + c.base + '"' + S + '/>' +
+        '<path d="M44 66H56M44 74H56" stroke="' + c.dark + '" stroke-width="2.5" stroke-linecap="round"/>' +
+        eye(39, 42) + eye(61, 42);
+    } else if (kind === 'rabbit') {
+      g = '<ellipse cx="35" cy="24" rx="10" ry="23"' + F + S + '/><ellipse cx="35" cy="26" rx="4.5" ry="15"' + soft + '/>' +
+        '<ellipse cx="65" cy="24" rx="10" ry="23"' + F + S + '/><ellipse cx="65" cy="26" rx="4.5" ry="15"' + soft + '/>' +
+        '<circle cx="50" cy="62" r="30"' + F + S + '/>' + eye(38, 58) + eye(62, 58) +
+        '<ellipse cx="50" cy="68" rx="4.5" ry="3.4" fill="#e0607e"/>' +
+        '<path d="M50 71V75M44 77Q50 81 56 77" fill="none" stroke="#1b1b1b" stroke-width="2.5" stroke-linecap="round"/>';
+    } else if (kind === 'cat') {
+      g = '<path d="M19 50L22 12L48 30Z"' + F + S + '/><path d="M81 50L78 12L52 30Z"' + F + S + '/>' +
+        '<path d="M26 38L27 24L38 32Z" fill="#e0607e" fill-opacity=".6"/><path d="M74 38L73 24L62 32Z" fill="#e0607e" fill-opacity=".6"/>' +
+        '<ellipse cx="50" cy="58" rx="34" ry="30"' + F + S + '/>' + eye(37, 54) + eye(63, 54) +
+        '<path d="M46 64H54L50 69Z" fill="#e0607e"/><path d="M50 69V72M44 74Q50 78 56 74" fill="none" stroke="#1b1b1b" stroke-width="2.5" stroke-linecap="round"/>' +
+        '<path d="M8 58L26 62M8 70L26 67M92 58L74 62M92 70L74 67" stroke="' + c.dark + '" stroke-width="2.5" stroke-linecap="round"/>';
+    } else {
+      g = '<circle cx="23" cy="28" r="14"' + F + S + '/><circle cx="23" cy="28" r="6"' + soft + '/>' +
+        '<circle cx="77" cy="28" r="14"' + F + S + '/><circle cx="77" cy="28" r="6"' + soft + '/>' +
+        '<circle cx="50" cy="56" r="34"' + F + S + '/>' + eye(37, 48) + eye(63, 48) +
+        '<ellipse cx="50" cy="67" rx="15" ry="11"' + soft + '/><ellipse cx="50" cy="62" rx="5.5" ry="4" fill="#1b1b1b"/>' +
+        '<path d="M50 66V71M44 73Q50 77 56 73" fill="none" stroke="#1b1b1b" stroke-width="2.5" stroke-linecap="round"/>';
+    }
+    return '<svg viewBox="0 0 100 100" aria-hidden="true">' + g + '</svg>';
+  }
+  function objects(kind, colorKey, n) {
+    var s = ''; for (var i = 0; i < n; i++) s += drawObject(kind, colorKey); return s;
+  }
+
+  // ---- ルール：レベルごとに使う属性が増える。2属性が軸になり、残りは関係なし（レベル5は縦軸が2属性） ----
+  var rule = null;
+  var AXES = ['color', 'count', 'kind', 'shape', 'clean'];
+  var AXIS_NAME = { color: 'いろ', count: 'こすう', kind: 'どうぶつ', shape: 'かたち', clean: 'きれい' };
+  var SHAPE_NAME = { square: 'しかく', round: 'まる' }, CLEAN_NAME = { clean: 'きれい', dirty: 'よごれ' };
+  var LEVEL_ATTRS = { 1: ['color', 'count'], 2: ['color', 'count', 'shape'], 3: ['color', 'count', 'shape', 'kind'], 4: AXES, 5: AXES };
+  var CLEAR_SCORES = { 1: 10, 2: 12, 3: 14, 4: 16, 5: 18 }, MAX_LEVEL = 5;
+  var level = 1, maxLevel = 1, fixedVals = {};
+  try { maxLevel = Math.min(MAX_LEVEL, Math.max(1, parseInt(localStorage.getItem('shiwake-maxlv') || '1', 10) || 1)); } catch (e) {}
+  function rnd(n) { return Math.floor(Math.random() * n); }
+  function pool(axis) {
+    return { color: COLOR_KEYS, count: [1, 2], kind: KIND_KEYS, shape: ['square', 'round'], clean: ['clean', 'dirty'] }[axis];
+  }
+  function pick2(arr) { var a = arr.slice(), x = a.splice(rnd(a.length), 1)[0], y = a.splice(rnd(a.length), 1)[0]; return [x, y]; }
+  function label(axis, v) {
+    return axis === 'color' ? PALETTE[v].kana : axis === 'count' ? v + '匹' : axis === 'kind' ? KINDS[v] : axis === 'shape' ? SHAPE_NAME[v] : CLEAN_NAME[v];
+  }
+  function newRule() {
+    var ax = LEVEL_ATTRS[level].slice(), hAxis = ax.splice(rnd(ax.length), 1)[0], vc, vAxes;
+    if (level === 5) {
+      var A = ax.splice(rnd(ax.length), 1)[0], B = ax.splice(rnd(ax.length), 1)[0], pa = pick2(pool(A)), pb = pick2(pool(B));
+      vc = { up: [{ axis: A, val: pa[0] }, { axis: B, val: pb[0] }], down: [{ axis: A, val: pa[1] }, { axis: B, val: pb[1] }] };
+      vAxes = [A, B];
+    } else {
+      var V = ax.splice(rnd(ax.length), 1)[0], vp = pick2(pool(V));
+      vc = { up: [{ axis: V, val: vp[0] }], down: [{ axis: V, val: vp[1] }] };
+      vAxes = [V];
+    }
+    var hp = pick2(pool(hAxis));
+    fixedVals = { kind: KIND_KEYS[rnd(KIND_KEYS.length)], shape: 'square', clean: 'clean' };
+    rule = { hAxis: hAxis, left: hp[0], right: hp[1], vc: vc, vAxes: vAxes, free: ax };
+  }
+  // 縦方向：条件のどれかに当てはまる側。両方に当てはまる／どちらにも当てはまらないカードは null
+  function vDir(card) {
+    function hit(c) { return card[c.axis] === c.val; }
+    var u = rule.vc.up.some(hit), d = rule.vc.down.some(hit);
+    return u && !d ? 'up' : d && !u ? 'down' : null;
+  }
+  function expectedFor(card, h, v) { return rule[h] === card[rule.hAxis] && vDir(card) === v; }
+  function vLabel(dir) { return rule.vc[dir].map(function (c) { return label(c.axis, c.val); }).join('／'); }
+  function renderRule() {
+    var map = '';
+    ['tl', 'tr', 'bl', 'br'].forEach(function (p) {
+      var hv = POS[p];
+      map += '<div><span>' + label(rule.hAxis, rule[hv[0]]) + '</span><span>' + vLabel(hv[1]) + '</span></div>';
+    });
+    ['left', 'right'].forEach(function (d) { $('edge-' + d).querySelector('span').textContent = label(rule.hAxis, rule[d]); });
+    ['up', 'down'].forEach(function (d) { $('edge-' + d).querySelector('span').textContent = vLabel(d); });
+    $('map').innerHTML = map;
+    $('lv-name').textContent = 'レベル' + level;
+    $('goal-lab').innerHTML = '仕分け数 <b>目標' + CLEAR_SCORES[level] + '枚</b>';
+    $('lv-attrs').innerHTML = 'どうぶつカードを4つのエリアに仕分けよう<br><b>目標' + CLEAR_SCORES[level] + '枚</b>';
+    $('lv-prev').disabled = level <= 1; $('lv-next').disabled = level >= maxLevel;
+  }
+
+  // ---- 状態 ----
+  var state = 'rule', score = 0, miss = 0, endAt = 0, locked = false, lockTimer = 0, raf = 0;
+  var cur = null, el = null;
+  function getBest(l) { try { return parseInt(localStorage.getItem('shiwake-best-' + l) || '0', 10) || 0; } catch (e) { return 0; } }
+  function setBest(l, v) { try { localStorage.setItem('shiwake-best-' + l, String(v)); } catch (e) {} }
+
+  function show(id, on) { $(id).hidden = !on; }
+  function showRule() {
+    state = 'rule'; newRule(); renderRule(); stopBgm();
+    clearCard(); setZones('');
+    show('ov-rule', true); show('ov-count', false); show('ov-result', false);
+    $('time').textContent = GAME_SEC.toFixed(1); $('score').textContent = '0';
+    $('barfill').style.transform = 'scaleX(1)'; $('bar').classList.remove('low');
+  }
+  function startCountdown() {
+    state = 'count'; score = 0; miss = 0;
+    show('ov-rule', false); show('ov-count', true);
+    var n = 3; $('count').textContent = n; beep(660, 0.12);
+    var iv = setInterval(function () {
+      n--;
+      if (n > 0) { $('count').textContent = n; beep(660, 0.12); return; }
+      clearInterval(iv); beep(990, 0.3); show('ov-count', false); startPlay();
+    }, 800);
+  }
+  function startPlay() {
+    state = 'play'; locked = false;
+    field.classList.remove('locked');
+    endAt = performance.now() + GAME_SEC * 1000;
+    startBgm(); spawn(); tick();
+  }
+  function tick() {
+    var left = Math.max(0, endAt - performance.now());
+    $('time').textContent = (left / 1000).toFixed(1);
+    $('barfill').style.transform = 'scaleX(' + (left / (GAME_SEC * 1000)) + ')';
+    $('bar').classList.toggle('low', left < 5000);
+    tempoUp = left < 5000;
+    if (left <= 0) { finish(); return; }
+    raf = requestAnimationFrame(tick);
+  }
+  function finish() {
+    state = 'result'; cancelAnimationFrame(raf); clearTimeout(lockTimer);
+    locked = false; field.classList.remove('locked'); clearCard(); setZones('');
+    stopBgm(); finishJingle();
+    var total = score + miss, acc = total ? Math.round(score / total * 100) : 0;
+    var goal = CLEAR_SCORES[level], cleared = score >= goal, hasNext = cleared && level < MAX_LEVEL;
+    var best = getBest(level), isBest = score > best;
+    if (isBest) { best = score; setBest(level, best); }
+    if (cleared && level < MAX_LEVEL && level + 1 > maxLevel) {
+      maxLevel = level + 1; try { localStorage.setItem('shiwake-maxlv', String(maxLevel)); } catch (e) {}
+    }
+    $('res-title').textContent = cleared ? (level === MAX_LEVEL ? '全レベルクリア！' : 'レベル' + level + ' クリア！') : 'タイムアップ';
+    $('res-score').textContent = score; $('res-miss').textContent = miss;
+    $('res-acc').textContent = total ? acc + '%' : '-'; $('res-best').textContent = best;
+    $('res-msg').textContent = cleared ? (isBest ? 'ベスト更新！' : '目標の' + goal + '枚をこえました。') : 'あと' + (goal - score) + '枚でクリアです';
+    show('nextbtn', hasNext);
+    $('againbtn').classList.toggle('sub', hasNext);
+    show('ov-result', true);
+  }
+
+
+  // ---- カード ----
+  function stains() {
+    var g = [], i;
+    for (i = 0; i < 5; i++) {
+      var r = 7 + rnd(10);
+      g.push('radial-gradient(circle at ' + (8 + rnd(84)) + '% ' + (8 + rnd(84)) + '%, rgba(98,68,30,.55) 0, rgba(98,68,30,.38) ' + r + '%, transparent ' + (r + 4) + '%)');
+    }
+    return g.join(',');
+  }
+  function cardKey(c) { return AXES.map(function (a) { return c[a]; }).join('/'); }
+  function randomCard() {
+    var c = {};
+    AXES.forEach(function (a) {
+      if (LEVEL_ATTRS[level].indexOf(a) < 0) { c[a] = fixedVals[a]; return; }
+      var p = pool(a); c[a] = p[rnd(p.length)];
+    });
+    c[rule.hAxis] = rule[rnd(2) ? 'left' : 'right'];
+    if (rule.vAxes.length === 1) c[rule.vAxes[0]] = rule.vc[rnd(2) ? 'up' : 'down'][0].val;
+    return c;
+  }
+  function spawn() {
+    var tries = 0, prev = cur ? cardKey(cur) : '';
+    do { cur = randomCard(); tries++; } while ((vDir(cur) === null || cardKey(cur) === prev) && tries < 300);
+    el = document.createElement('div');
+    el.className = 'card' + (cur.count === 2 ? ' two' : '') + (cur.shape === 'round' ? ' round' : '') + (cur.clean === 'dirty' ? ' dirty' : '');
+    if (cur.clean === 'dirty') el.style.setProperty('--stains', stains());
+    el.innerHTML = objects(cur.kind, cur.color, cur.count);
+    el.style.rotate = (rnd(9) - 4) + 'deg';
+    field.appendChild(el);
+  }
+  function clearCard() {
+    Array.prototype.forEach.call(field.querySelectorAll('.card'), function (c) { c.remove(); });
+    el = null; cur = null;
+  }
+  function setZones(cls, pos) {
+    for (var p in zones) {
+      zones[p].classList.remove('hot', 'ok', 'ng');
+      if (cls && p === pos) zones[p].classList.add(cls);
+    }
+  }
+  function posOf(h, v) { return (v === 'up' ? 't' : 'b') + (h === 'left' ? 'l' : 'r'); }
+
+  function answer(h, v) {
+    if (state !== 'play' || locked || !cur) return;
+    var pos = posOf(h, v), old = el;
+    if (expectedFor(cur, h, v)) {
+      score++; $('score').textContent = score; seOk();
+      var w = field.clientWidth, ht = field.clientHeight;
+      var dx = (h === 'right' ? 1 : -1) * w * 0.55, dy = (v === 'down' ? 1 : -1) * ht * 0.5;
+      old.classList.remove('snap'); old.style.animation = 'none';
+      old.style.transition = 'transform .22s ease-in, opacity .22s';
+      old.style.transform = 'translate(-50%,-50%) translate(' + dx + 'px,' + dy + 'px) rotate(' + (dx > 0 ? 25 : -25) + 'deg)';
+      old.style.opacity = '0';
+      setTimeout(function () { old.remove(); }, 240);
+      setZones('ok', pos); setTimeout(function () { if (!locked) setZones(''); }, 140);
+      spawn();
+    } else {
+      miss++; locked = true; field.classList.add('locked'); seNg();
+      old.style.transition = ''; old.style.transform = ''; old.classList.add('snap', 'shake');
+      setZones('ng', pos);
+      clearTimeout(lockTimer);
+      lockTimer = setTimeout(function () {
+        locked = false; field.classList.remove('locked'); setZones('');
+        if (old) old.classList.remove('shake');
+      }, LOCK_MS);
+    }
+  }
+
+  // ---- ポインタ操作 ----
+  var drag = null;
+  field.addEventListener('pointerdown', function (e) {
+    if (state !== 'play' || locked || !el || e.target.closest('.overlay')) return;
+    drag = { id: e.pointerId, x: e.clientX, y: e.clientY };
+    field.setPointerCapture(e.pointerId);
+    field.classList.add('drag');
+    el.classList.remove('snap'); el.style.transition = 'none';
+  });
+  function dirOf(dx, dy) { return [dx >= 0 ? 'right' : 'left', dy >= 0 ? 'down' : 'up']; }
+  field.addEventListener('pointermove', function (e) {
+    if (!drag || e.pointerId !== drag.id || !el) return;
+    var dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+    el.style.transform = 'translate(-50%,-50%) translate(' + dx + 'px,' + dy + 'px) rotate(' + Math.max(-20, Math.min(20, dx * 0.06)) + 'deg)';
+    if (Math.hypot(dx, dy) >= SWIPE_MIN) { var d = dirOf(dx, dy); setZones('hot', posOf(d[0], d[1])); } else setZones('');
+  });
+  function endDrag(e, cancel) {
+    if (!drag || e.pointerId !== drag.id) return;
+    var dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+    drag = null; field.classList.remove('drag'); setZones('');
+    if (!el) return;
+    if (!cancel && Math.hypot(dx, dy) >= SWIPE_MIN) { var d = dirOf(dx, dy); answer(d[0], d[1]); }
+    else { el.classList.add('snap'); el.style.transition = ''; el.style.transform = ''; }
+  }
+  field.addEventListener('pointerup', function (e) { endDrag(e, false); });
+  field.addEventListener('pointercancel', function (e) { endDrag(e, true); });
+
+  // ---- 音（Web Audioで生成。外部ファイルなし） ----
+  var AC = null, master = null, muted = false, tempoUp = false;
+  try { muted = localStorage.getItem('shiwake-mute') === '1'; } catch (e) {}
+  function audio() {
+    if (!AC) {
+      var C = window.AudioContext || window.webkitAudioContext; if (!C) return null;
+      AC = new C(); master = AC.createGain(); master.gain.value = muted ? 0 : 0.45; master.connect(AC.destination);
+    }
+    if (AC.state === 'suspended') AC.resume();
+    return AC;
+  }
+  function mtof(m) { return 440 * Math.pow(2, (m - 69) / 12); }
+  function tone(freq, t, dur, type, vol, slideTo) {
+    var a = audio(); if (!a) return;
+    var o = a.createOscillator(), g = a.createGain();
+    o.type = type; o.frequency.setValueAtTime(freq, t);
+    if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, t + dur);
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g); g.connect(master); o.start(t); o.stop(t + dur + 0.02);
+  }
+  var noiseBuf = null;
+  function hat(t, vol) {
+    var a = audio(); if (!a) return;
+    if (!noiseBuf) { noiseBuf = a.createBuffer(1, a.sampleRate * 0.05, a.sampleRate); var d = noiseBuf.getChannelData(0); for (var i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; }
+    var s = a.createBufferSource(), f = a.createBiquadFilter(), g = a.createGain();
+    s.buffer = noiseBuf; f.type = 'highpass'; f.frequency.value = 7000;
+    g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.04);
+    s.connect(f); f.connect(g); g.connect(master); s.start(t);
+  }
+  function beep(f, d) { var a = audio(); if (a) tone(f, a.currentTime, d, 'square', 0.18); }
+  function seOk() { var a = audio(); if (!a) return; var t = a.currentTime; tone(880, t, 0.07, 'triangle', 0.3); tone(1320, t + 0.06, 0.1, 'triangle', 0.3); }
+  function seNg() { var a = audio(); if (!a) return; tone(180, a.currentTime, 0.3, 'sawtooth', 0.3, 70); }
+  function finishJingle() {
+    var a = audio(); if (!a) return; var t = a.currentTime + 0.05;
+    [72, 67, 64, 60].forEach(function (m, i) { tone(mtof(m), t + i * 0.14, 0.3, 'triangle', 0.3); });
+    tone(mtof(48), t + 0.56, 0.9, 'triangle', 0.3);
+  }
+
+  // BGM: C - Am - F - G を回す8ビート
+  var CH = [[48, [0, 4, 7]], [45, [0, 3, 7]], [41, [0, 4, 7]], [43, [0, 4, 7]]];
+  var ARP = [0, 1, 2, 1, 2, 1, 2, 1], MEL = [4, 7, 9, 7, 4, 2, 4, 7];
+  var bgmTimer = 0, nextT = 0, stepN = 0;
+  function schedStep(n, t) {
+    var ch = CH[Math.floor(n / 8) % 4], root = ch[0], tri = ch[1], i = n % 8;
+    if (i % 2 === 0) { tone(mtof(root - 12 + (i === 4 ? 12 : 0)), t, 0.2, 'triangle', 0.32); }
+    if (i % 4 === 0) tone(150, t, 0.12, 'sine', 0.4, 45);
+    if (i % 2 === 1) hat(t, 0.12);
+    tone(mtof(root + 12 + tri[ARP[i]]), t, 0.12, 'square', 0.07);
+    if (Math.floor(n / 32) % 2 === 1 && i % 2 === 0) tone(mtof(72 + [0, 2, 4, 7, 9][(n * 3 + i) % 5]), t, 0.16, 'triangle', 0.13);
+  }
+  function startBgm() {
+    var a = audio(); if (!a) return; stopBgm();
+    nextT = a.currentTime + 0.05; stepN = 0;
+    bgmTimer = setInterval(function () {
+      while (nextT < a.currentTime + 0.15) { schedStep(stepN++, nextT); nextT += 60 / (tempoUp ? 168 : 132) / 2; }
+    }, 40);
+  }
+  function stopBgm() { clearInterval(bgmTimer); bgmTimer = 0; tempoUp = false; }
+  function applyMute() {
+    $('mute').setAttribute('aria-pressed', muted ? 'true' : 'false');
+    if (master) master.gain.value = muted ? 0 : 0.45;
+  }
+  $('mute').addEventListener('click', function () {
+    muted = !muted; try { localStorage.setItem('shiwake-mute', muted ? '1' : '0'); } catch (e) {}
+    audio(); applyMute();
+  });
+  applyMute();
+
+  // ---- ボタン ----
+  $('startbtn').addEventListener('click', function () { audio(); startCountdown(); });
+  $('againbtn').addEventListener('click', showRule);
+  $('nextbtn').addEventListener('click', function () { level = Math.min(MAX_LEVEL, level + 1); showRule(); });
+  $('lv-prev').addEventListener('click', function () { if (level > 1) { level--; newRule(); renderRule(); } });
+  $('lv-next').addEventListener('click', function () { if (level < maxLevel) { level++; newRule(); renderRule(); } });
+
+  showRule();
+})();
+</script>
